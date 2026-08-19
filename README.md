@@ -10,7 +10,7 @@ AI Agent ──stdio──▶ server.py (MCP) ───────────�
 
 ## Setup
 
-Install dependencies: `pip install mcp`
+Install dependencies: `pip install fastmcp`
 
 **Receiver** — run `receiver.py` on a machine your phone can reach. Open port 8765/tcp (Tailscale-only recommended).
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 DATA_FILE = Path(__file__).parent / "phone-location.json"
 mcp = FastMCP("phone-location")
