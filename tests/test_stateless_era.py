@@ -1,0 +1,353 @@
+"""phone-location-mcp T03: stateless 2026-07-28 era test suite.
+
+Written RED against the legacy server on purpose (TDD discipline —
+00-plan-context: "watch the test fail"). The suite is the spec for the
+post-migration stdlib server (T04/T05); the repo pytest gate goes green
+only at T06.
+
+Spawn interpreter: BIN_PY = /usr/bin/python3 — the TARGET production line
+(the cutover D.1 config flip; PLAN F4-style pin). Against the CURRENT
+legacy server this spawn is import-death (fastmcp is absent there, so the
+server never answers a byte); the substantive era violations it also pins
+(`initialize` answered instead of -32601, no `server/discover` era result)
+are live-verified legacy facts in _chain.md's "Legacy wire shape" row.
+
+Every read from a spawned server goes through the fleet deadline helper
+read_line_with_timeout (pytest-timeout is NOT installed in the pytest
+interpreter, so the deadline lives IN the helper; a timeout reads as a
+test failure, never a wedge). No test reads the real phone-location.json
+and nothing touches the network: the tools/call legs use an unknown tool
+or the no-data canned path via PHONE_LOCATION_DATA_FILE (which short-
+circuits before _reverse_geocode, so zero urlopen calls by construction).
+"""
+
+import json
+import os
+import select
+import subprocess
+from pathlib import Path
+
+SERVER = Path(__file__).resolve().parent.parent / "server.py"
+GOLDEN_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "golden"
+    / "phone-location.tools.json"
+)
+
+# TARGET production interpreter (post-rewrite spawn line, D.1 cutover).
+# If D.1 re-pins, this is the one-line grep: BIN_PY.
+BIN_PY = "/usr/bin/python3"
+
+ERA_VERSION = "2026-07-28"
+READ_TIMEOUT = 10.0  # seconds; generous — a dead/legacy server hits it fast
+
+
+# ------------------------------------------------------------------ helpers
+
+
+def read_line_with_timeout(f, sec):
+    """Fleet deadline helper: one line from f within sec, else None.
+
+    Built on select.select — a bare readline() is forbidden here because
+    the legacy server under BIN_PY never answers a byte and would wedge
+    the whole run.
+    """
+    ready, _, _ = select.select([f], [], [], sec)
+    if not ready:
+        return None
+    return f.readline()
+
+
+class EraServer:
+    """Spawned server over stdio + line-oriented JSON-RPC with deadlines.
+
+    `self.silent` mirrors what the last rpc() saw: True when the server
+    answered nothing within the deadline (import-death / legacy silence).
+    """
+
+    def __init__(self, env=None):
+        spawn_env = dict(os.environ)
+        # Canned data-file seam: point at a path that never exists so the
+        # tools take the deterministic no-data branch (zero network).
+        spawn_env["PHONE_LOCATION_DATA_FILE"] = "/tmp/phone-location-t03-missing.json"
+        if env:
+            spawn_env.update(env)
+        self.proc = subprocess.Popen(
+            [BIN_PY, str(SERVER)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=spawn_env,
+            text=True,
+        )
+        self.silent = False
+        self._next_id = 0
+
+    def send_line(self, line):
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+
+    def send(self, msg):
+        self.send_line(json.dumps(msg))
+
+    def next_id(self):
+        self._next_id += 1
+        return self._next_id
+
+    def read(self, sec=READ_TIMEOUT):
+        line = read_line_with_timeout(self.proc.stdout, sec)
+        self.silent = line is None or not line.strip()
+        return None if self.silent else json.loads(line)
+
+    def rpc(self, method, params=None, msg_id=None):
+        """One request with an id -> exactly one response (or None on timeout)."""
+        mid = self.next_id() if msg_id is None else msg_id
+        msg = {"jsonrpc": "2.0", "id": mid, "method": method}
+        if params is not None:
+            msg["params"] = params
+        self.send(msg)
+        return self.read()
+
+    def alive(self):
+        return self.proc.poll() is None
+
+    def close_stdin(self):
+        self.proc.stdin.close()
+
+    def kill(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
+
+
+def _spawn(env=None):
+    """Yield-style fixture helper (no pytest fixture imports needed)."""
+    return EraServer(env=env)
+
+
+# ------------------------------------------------------------------- 1. + 2.
+
+
+def test_discover_era_shape():
+    """server/discover answers the pinned era shape (REFERENCE §2)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("server/discover", {"clientInfo": {"name": "t03"}})
+        assert resp is not None, "server/discover answered nothing (import-death or silence)"
+        result = resp["result"]
+        assert result["supportedVersions"] == [ERA_VERSION]
+        assert result["capabilities"] == {"tools": {}}
+        assert result["resultType"] == "complete"
+        assert result["ttlMs"] == 0
+        assert result["cacheScope"] == "private"
+    finally:
+        srv.kill()
+
+
+def test_discover_paramless():
+    """The request may arrive with no params at all; must answer either way (§2)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("server/discover")  # no params key at all
+        assert resp is not None, "paramless server/discover answered nothing"
+        assert resp["result"]["supportedVersions"] == [ERA_VERSION]
+    finally:
+        srv.kill()
+
+
+# ---------------------------------------------------------------------- 3.
+
+
+def test_initialize_rejected_32601_same_pipe_discover():
+    """initialize -> -32601 (never hang/close), then discover on the SAME pipes
+    still works and the server stays alive (REFERENCE §3 hard rules)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("initialize", {"protocolVersion": ERA_VERSION,
+                                      "capabilities": {},
+                                      "clientInfo": {"name": "t03"}})
+        assert resp is not None, "initialize answered nothing (legacy silence under BIN_PY)"
+        assert "error" in resp and resp["error"]["code"] == -32601, (
+            "initialize must be rejected with -32601, never answered")
+        # same-pipe follow-up: the era entry point still works afterwards
+        disc = srv.rpc("server/discover")
+        assert disc is not None, "server died after rejecting initialize"
+        assert disc["result"]["supportedVersions"] == [ERA_VERSION]
+        assert srv.alive(), "server must not exit on a rejected method"
+    finally:
+        srv.kill()
+
+
+# ------------------------------------------------------------------ 4. + 5.
+
+
+def test_tools_list_era_triple():
+    """tools/list result carries the era triple: resultType complete /
+    ttlMs 0 / cacheScope private, and the 2-tool surface (REFERENCE §4)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("tools/list")
+        assert resp is not None, "tools/list answered nothing"
+        result = resp["result"]
+        assert result["resultType"] == "complete"
+        assert result["ttlMs"] == 0
+        assert result["cacheScope"] == "private"
+        assert len(result["tools"]) == 2
+    finally:
+        srv.kill()
+
+
+def test_tools_list_has_no_output_schema():
+    """THE TRAP (D3, REFERENCE §4): the migrated listing declares NO
+    outputSchema on any tool (legacy fastmcp goldens HAVE one — the era
+    server must not, or validate_tool_result raises on every call)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("tools/list")
+        assert resp is not None, "tools/list answered nothing"
+        tools = resp["result"]["tools"]
+        assert all("outputSchema" not in t for t in tools), (
+            "migrated listing must not carry outputSchema")
+    finally:
+        srv.kill()
+
+
+def test_tools_list_golden_byte_identity():
+    """UNCONDITIONAL golden freeze test (00-plan-context recipe 3):
+    name+description+inputSchema byte-identical per tool against the
+    committed golden (absolute __file__-derived path, no skipif);
+    outputSchema stripped from the golden before diffing (old fastmcp
+    goldens HAVE it — the new server must NOT), and the golden's
+    inputSchema is the VERIFIED paramless shape for both tools."""
+    golden = json.loads(GOLDEN_PATH.read_text())  # absolute __file__-derived path
+    # strip outputSchema (and any other legacy-only keys) before diffing:
+    # the era contract is name + description + inputSchema only.
+    expected = {
+        t["name"]: (t["name"], t["description"], t["inputSchema"])
+        for t in golden
+    }
+    assert set(expected) == {"get", "summary"}
+    for _, _, input_schema in expected.values():
+        assert input_schema == {
+            "additionalProperties": False,
+            "properties": {},
+            "type": "object",
+        }
+
+    srv = _spawn()
+    try:
+        resp = srv.rpc("tools/list")
+        assert resp is not None, "tools/list answered nothing"
+        listed = {
+            t["name"]: (t["name"], t["description"], t["inputSchema"])
+            for t in resp["result"]["tools"]
+        }
+        assert listed == expected, "tools surface drifted from the frozen golden"
+        assert all("outputSchema" not in t for t in resp["result"]["tools"])
+    finally:
+        srv.kill()
+
+
+# ----------------------------------------------------------------- 6. and 7.
+
+
+def test_tools_call_era_triple_and_text_passthrough():
+    """tools/call result carries the triple; the string return passes
+    through VERBATIM in content[0].text (R3 sanctioned string-passthrough
+    DEVIATION; no structuredContent, no outputSchema). No-data canned
+    path via env seam -> deterministic, zero network."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("tools/call", {"name": "summary", "arguments": {}})
+        assert resp is not None, "tools/call answered nothing"
+        assert "result" in resp, f"expected a result, got {resp}"
+        result = resp["result"]
+        assert result["resultType"] == "complete"
+        assert result["ttlMs"] == 0
+        assert result["cacheScope"] == "private"
+        assert "structuredContent" not in result
+        assert result.get("isError") is not True
+        texts = [c for c in result["content"] if c.get("type") == "text"]
+        assert texts, "expected text content"
+        assert "No location data" in texts[0]["text"], (
+            "canned no-data text missing -> data seam not honored")
+    finally:
+        srv.kill()
+
+
+def test_tools_call_unknown_tool_is_error_result():
+    """An unknown tool name is a RESULT with isError:true carrying the text
+    error (REFERENCE §5) — never a JSON-RPC error, never a crash."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("tools/call", {"name": "no-such-tool", "arguments": {}})
+        assert resp is not None, "tools/call answered nothing"
+        assert "result" in resp, "tool-level errors are results, not JSON-RPC errors"
+        result = resp["result"]
+        assert result["resultType"] == "complete"
+        assert result["ttlMs"] == 0
+        assert result["cacheScope"] == "private"
+        assert result["isError"] is True
+        joined = "".join(c.get("text", "") for c in result["content"])
+        assert "Unknown tool" in joined
+    finally:
+        srv.kill()
+
+
+# -------------------------------------------------------------- 8., 9., 10..
+
+
+def test_ping_answers_empty_object():
+    """ping (a request with id) -> result {} (REFERENCE §6 copy-the-{} form)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("ping")
+        assert resp is not None, "ping answered nothing"
+        assert resp["result"] == {}
+        assert srv.alive()
+    finally:
+        srv.kill()
+
+
+def test_unknown_method_32601():
+    """Any other method with an id (e.g. resources/list) -> -32601 (§3, §6)."""
+    srv = _spawn()
+    try:
+        resp = srv.rpc("resources/list")
+        assert resp is not None, "resources/list answered nothing"
+        assert resp["error"]["code"] == -32601
+        assert srv.alive()
+    finally:
+        srv.kill()
+
+
+def test_notifications_initialized_swallowed():
+    """A notification (no id) is consumed silently — NEVER answered, even
+    for a legacy-era method name (§1 rule: a spurious response corrupts
+    client correlation). Then a real request on the same pipe still works."""
+    srv = _spawn()
+    try:
+        srv.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        # proof of silence: the next response must carry the NEXT id (2),
+        # so an id-less phantom answer would break correlation.
+        resp = srv.rpc("ping", msg_id=2)
+        assert resp is not None, "server answered nothing to the follow-up request"
+        assert resp["id"] == 2, (
+            "id mismatch: the server emitted a phantom response to the notification")
+        assert resp["result"] == {}
+    finally:
+        srv.kill()
+
+
+# -------------------------------------------------------------------- 12..
+
+
+def test_eof_clean_exit_zero():
+    """Close stdin -> loop ends -> interpreter exits rc 0 within 5 s (§7)."""
+    srv = _spawn()
+    try:
+        srv.close_stdin()
+        rc = srv.proc.wait(timeout=5)
+        assert rc == 0, f"EOF exit must be clean rc=0, got {rc}"
+    finally:
+        srv.kill()
