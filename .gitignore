@@ -1,3 +1,6 @@
 phone-location.json
 __pycache__/
 *.pyc
+# golden/ = tracked characterization specs (recipe 3): ignore everything, un-ignore the JSON specs
+golden/*
+!golden/*.json

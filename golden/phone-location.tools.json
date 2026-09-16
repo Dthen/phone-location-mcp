@@ -1,0 +1,54 @@
+[
+  {
+    "name": "get",
+    "description": "Get the phone's current GPS location with full detail.\n\nReturns a JSON object with lat, lon, accuracy, speed, bearing, altitude,\nprovider, age, freshness, and a reverse-geocoded address. Use for structured data.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "type": "object",
+      "x-fastmcp-wrap-result": true
+    },
+    "_meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    }
+  },
+  {
+    "name": "summary",
+    "description": "Get a quick human-readable summary of where the phone is right now.\n\nReturns one line: address, coordinates, accuracy, and how long the phone\nhas been at that location. Use for simple queries.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "type": "object",
+      "x-fastmcp-wrap-result": true
+    },
+    "_meta": {
+      "fastmcp": {
+        "tags": []
+      }
+    }
+  }
+]
