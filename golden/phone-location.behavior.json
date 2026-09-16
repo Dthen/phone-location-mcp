@@ -1,0 +1,77 @@
+{
+  "_meta": {
+    "generated_by": "tools/characterize_old_server.py (T02)",
+    "server": "/home/kimbo/projects/phone-location-mcp/server.py",
+    "tag": "pre-migration/20260914",
+    "interpreter": "3.11.15",
+    "interpreter_path": "/mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3",
+    "fixture": "/home/kimbo/projects/phone-location-mcp/golden/phone-location.fixture.json",
+    "pinned_now_utc": "2026-09-16T12:00:00+00:00",
+    "fixture_received_at": "2026-09-16T09:00:00+00:00",
+    "age_seconds_at_pinned_now": 10800,
+    "now_offset_note": "freshness text is deterministic under the pinned clock: pinned now (2026-09-16T12:00:00+00:00) - fixture received_at (2026-09-16T09:00:00+00:00) = 10800s = 'at this location for 3 hours'",
+    "isolation": "urlopen patched per case (ok/fail/trap with call-count assert on no-data); _reverse_geocode.cache_clear() before every case; DATA_FILE -> fixture or nonexistent /tmp path; live phone-location.json never read; datetime patched via PinnedFakeDatetime subclass"
+  },
+  "legacy_notes": {
+    "structuredContent_wrapper": "fastmcp 3.4.7 wraps str tool returns as structuredContent={'result': <str>} (re-pinned in-process against the tag interpreter via mcp.call_tool). Recorded ONLY as a legacy wire-shape note — the migrated era server emits NO structuredContent and NO outputSchema (D3 / REFERENCE §4 trap); NEVER an assertion target.",
+    "structured_content_probe": {
+      "summary": {
+        "result": "📱 Phone is at High Street, Edinburgh EH1 — Scotland — 55.95334, -3.18830 (±12m accuracy) at this location for 3 hours"
+      }
+    },
+    "output_schema_probe": {
+      "get": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "summary": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      }
+    },
+    "string_returns_verified": true,
+    "reference": "_chain.md 'Legacy wire shape' + 'R3' rows; probe 2026-09-14 VERIFIED tools/call result keys _meta,content,isError,structuredContent with structuredContent={'result':<str>}"
+  },
+  "cases": {
+    "get/geocode-hit": {
+      "text": "{\n  \"lat\": 55.95334,\n  \"lon\": -3.1883,\n  \"accuracy_m\": 12.0,\n  \"speed_kmh\": 0.0,\n  \"bearing\": 175.0,\n  \"altitude_m\": 45.5,\n  \"provider\": \"gps\",\n  \"gps_timestamp_utc\": \"2026-09-16T08:25:00+00:00\",\n  \"age_seconds\": 10800,\n  \"freshness\": \"at this location for 3 hours\",\n  \"place\": \"High Street, Edinburgh EH1 \\u2014 Scotland\"\n}",
+      "call_count": 1
+    },
+    "get/geocode-fail": {
+      "text": "{\n  \"lat\": 55.95334,\n  \"lon\": -3.1883,\n  \"accuracy_m\": 12.0,\n  \"speed_kmh\": 0.0,\n  \"bearing\": 175.0,\n  \"altitude_m\": 45.5,\n  \"provider\": \"gps\",\n  \"gps_timestamp_utc\": \"2026-09-16T08:25:00+00:00\",\n  \"age_seconds\": 10800,\n  \"freshness\": \"at this location for 3 hours\",\n  \"place\": \"\"\n}",
+      "call_count": 1
+    },
+    "get/no-data": {
+      "text": "{\"error\": \"No location data available yet \\u2014 the phone has not reported in.\", \"hint\": \"Ensure GPSLogger is running on the phone and has an active GPS fix.\"}",
+      "call_count": 0
+    },
+    "summary/geocode-hit": {
+      "text": "📱 Phone is at High Street, Edinburgh EH1 — Scotland — 55.95334, -3.18830 (±12m accuracy) at this location for 3 hours",
+      "call_count": 1
+    },
+    "summary/geocode-fail": {
+      "text": "📱 Phone is at 55.95334, -3.18830 (±12m accuracy) at this location for 3 hours",
+      "call_count": 1
+    },
+    "summary/no-data": {
+      "text": "No location data yet — the phone hasn't reported in. Make sure GPSLogger is running and has a GPS fix.",
+      "call_count": 0
+    }
+  }
+}

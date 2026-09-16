@@ -1,0 +1,11 @@
+{
+  "lat": 55.95334,
+  "lon": -3.1883,
+  "accuracy_m": 12.0,
+  "speed_kmh": 0.0,
+  "bearing": 175.0,
+  "altitude_m": 45.5,
+  "provider": "gps",
+  "timestamp_utc": "2026-09-16T08:25:00+00:00",
+  "received_at": "2026-09-16T09:00:00+00:00"
+}
