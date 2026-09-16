@@ -64,4 +64,24 @@ target after this migration (post-rewrite server is stdlib-only, runs anywhere �
 
 T10's scratch-HERMES_HOME gate PROVED this exact line (auto + stateless: `✓ Connected` +
 `✓ Tools discovered: 2`, stdout-judged). Version tag/push are owner-gated (R4): local
-commits only, no tag in this chain, no pushes.
+commits only, no tag in this chain, no pushes."
+
+## CARD-CLAIM RECONCILIATION LEDGER (T12, 2026-09-16)
+
+Card B.1 claims vs live-verified facts — reconciled at chain end:
+
+| card claim | live fact | disposition |
+|---|---|---|
+| Card step 0: `git tag pre-migration/20260913` | Tag made and verified: `pre-migration/20260914` → `2d52620` (2026-09-14, not 2026-09-13) | SUPERSEDED — tag-date 20260914 |
+| Card B.1: version 1.0.0→1.1.0 | No "1.0.0" string ever existed in tracked files; fastmcp self-reported 3.4.7. T07 introduced ServerInfo 1.1.0 | SUPERSEDED — version 1.0.0→1.1.0 correction recorded |
+| Card B.1: VmHWM ≤ 25 MB success criterion | R5 RETIRED 2026-09-14 ~15:40 — no memory measurement anywhere | SUPERSEDED per R5 |
+| Card B.1: R1 TimeoutError-pin | N/A — urllib-native, never httpx; `grep -rn httpx` zero hits; no shim | N/A with evidence |
+| Card B.1: golden byte-identity | MET — golden/phone-location.tools.json tracked, byte-identity asserted in T05 freeze test | MET |
+| Card B.1: hermes mcp test | MET — T10 scratch HERMES_HOME auto+stateless gate PASS (stdout-judged) | MET |
+| Card B.1: pytest | MET — 29 passed (repo + fresh clone) | MET |
+| Card B.1: reviews | MET — one review round per task, all approved | MET |
+
+Golden/fixture provenance: golden/phone-location.tools.json (T00, tracked spec),
+golden/phone-location.behavior.json (T02, canned-fixture characterization),
+golden/phone-location.fixture.json (T02, mutable GPS JSON route). All tracked;
+no test opens an ignored file (fresh-clone gate green).
