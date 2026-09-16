@@ -132,9 +132,17 @@ def _assert_case(case_key, tool, kind, tmp_path, monkeypatch):
     server._reverse_geocode.cache_clear()
 
     # Pin the golden's fixture pointer instead of trusting ambient state.
-    assert Path(META["fixture"]) == FIXTURE_PATH, (
-        f"golden _meta fixture {META['fixture']!r} is not the tracked "
-        f"{FIXTURE_PATH} — replay would assert against the wrong input")
+    # Relocatable by design: _meta.fixture is the ABSOLUTE path T02 recorded at
+    # capture time, which cannot equal this checkout's path after a clone to a
+    # different location. Pin the repo-relative tail (golden/<fixture name>)
+    # identity on both sides instead of the capture-time absolute path.
+    meta_fixture = Path(META["fixture"])
+    local_tail = FIXTURE_PATH.relative_to(REPO)
+    meta_tail = meta_fixture.relative_to(meta_fixture.parents[1]) if len(meta_fixture.parents) > 1 else meta_fixture
+    assert meta_tail == local_tail, (
+        f"golden _meta fixture {META['fixture']!r} does not tail-match the "
+        f"tracked {local_tail} under this checkout — replay would assert "
+        f"against the wrong input")
 
     calls = []
 
