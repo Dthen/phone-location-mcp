@@ -356,3 +356,157 @@ def test_eof_clean_exit_zero():
         assert rc == 0, f"EOF exit must be clean rc=0, got {rc}"
     finally:
         srv.kill()
+
+
+# ============================================================ T08 regressions
+# REFERENCE §7 test-suite recipe: five canonical regressions + the non-JSON
+# garbage-lines test = six. Each was an A.1 code-quality killer (guards in
+# §1/§3/§5; the §1 reconfigure guard ships since T04 — server.py:11 — and
+# test_binary_garbage_line_does_not_kill_the_server pins it, making E.1's
+# retro-fit a NO-OP here). Cite REFERENCE, not other repos' commits.
+
+
+def test_garbage_lines_do_not_kill_the_server():
+    """Non-JSON lines are skipped, never fatal (§1 except-continue, §7)."""
+    srv = _spawn()
+    try:
+        garbage = ["not json at all", "{{{{", "{bad: json,]", "[]]]",
+                   "hello world 42"]
+        for g in garbage:
+            srv.send_line(g)
+        resp = srv.rpc("server/discover")
+        assert resp is not None, (
+            f"server answered nothing after garbage stream {garbage!r}")
+        assert resp["result"]["supportedVersions"] == [ERA_VERSION]
+        assert srv.alive(), "server must survive non-JSON garbage lines"
+    finally:
+        srv.kill()
+
+
+def test_non_dict_json_lines_do_not_kill_the_server():
+    """Valid JSON that isn't an object (5, null, [1,2]) is skipped like
+    garbage (§1 isinstance guard) — no response, no crash."""
+    srv = _spawn()
+    try:
+        non_dict = ["5", "null", "[1,2]"]
+        for raw in non_dict:
+            srv.send_line(raw)
+        resp = srv.rpc("tools/list")
+        assert resp is not None, (
+            f"server answered nothing after non-dict JSON lines {non_dict!r}")
+        assert resp["id"] == 1, (
+            "a phantom response to a non-dict line broke correlation "
+            f"(got id {resp.get('id')!r} for request id 1)")
+        assert "result" in resp, f"expected a result, got {resp}"
+        assert srv.alive(), "server must survive non-dict JSON lines"
+    finally:
+        srv.kill()
+
+
+def test_non_string_method_routes_as_unknown_method():
+    """A non-string method (null, 42) must route as unknown-method -32601
+    rather than crash on .startswith (§1 rule; A.1 code-quality killer)."""
+    srv = _spawn()
+    try:
+        for bad_method in (None, 42):
+            srv.send({"jsonrpc": "2.0", "id": 7, "method": bad_method})
+            line = srv.read()
+            assert line is not None, (
+                f"method={bad_method!r} produced silence (crash-loop "
+                "or unanswered request)")
+            assert "error" in line, (
+                f"non-string method={bad_method!r}: expected an error "
+                f"response, got {line}")
+            assert line["error"]["code"] == -32601, (
+                f"non-string method={bad_method!r} must route as "
+                f"unknown-method -32601, got {line}")
+            assert line["id"] == 7, (
+                f"non-string method={bad_method!r}: response id must echo "
+                f"request id 7, got {line}")
+        assert srv.alive(), "server must survive non-string method values"
+    finally:
+        srv.kill()
+
+
+def test_id_less_unknown_request_answered_by_nothing():
+    """An unknown method with NO id is a notification: it must be answered
+    by NOTHING — a spurious "id": null error corrupts client correlation
+    (§1 rule, §3 rid-is-None guard). Proof by correlation: the next real
+    request's response carries its own id."""
+    srv = _spawn()
+    try:
+        srv.send({"jsonrpc": "2.0", "method": "no/such/notification"})
+        resp = srv.rpc("ping", msg_id=2)
+        assert resp is not None, "server answered nothing to the follow-up request"
+        assert resp["id"] == 2, (
+            "id mismatch: the server emitted a phantom response to the "
+            f"id-less unknown request (got id {resp.get('id')!r}, expected 2)")
+        assert resp["result"] == {}
+        assert srv.alive()
+    finally:
+        srv.kill()
+
+
+def test_tools_call_missing_params_gets_minus_32602():
+    """tools/call with params absent / non-dict, or with a non-string /
+    missing name, must get JSON-RPC -32602 (REFERENCE §5 check-upfront) —
+    never -32603, never a crash. Owner test for the -32602 mandate T05
+    imposes; the 12 era tests do not cover it."""
+    srv = _spawn()
+    try:
+        srv.send({"jsonrpc": "2.0", "id": 1, "method": "tools/call"})   # no params key
+        cases = [
+            ("absent params", None),
+            ("params non-dict (list)", [1, 2]),
+            ("params non-dict (str)", "nope"),
+            ("params without name", {"arguments": {}}),
+            ("params name non-string", {"name": 42}),
+        ]
+        mid = 1
+        for label, params in cases:
+            if params is not None:
+                mid += 1
+                srv.send({"jsonrpc": "2.0", "id": mid, "method": "tools/call",
+                          "params": params})
+            line = srv.read()
+            assert line is not None, f"{label}: tools/call answered nothing"
+            assert "error" in line, (
+                f"{label}: expected a JSON-RPC error, got {line}")
+            assert line["error"]["code"] == -32602, (
+                f"{label}: must be -32602 (check-upfront, REFERENCE §5), "
+                f"never -32603, got {line}")
+            assert line["id"] == mid, (
+                f"{label}: response id must echo request id {mid}, got {line}")
+        assert srv.alive(), "server must survive missing/non-dict params"
+    finally:
+        srv.kill()
+
+
+def test_binary_garbage_line_does_not_kill_the_server():
+    """REFERENCE §7 binary-garbage skeleton, copied verbatim (G→D→G→L
+    stream, id-correlation asserts, rc=0 on EOF). Bytes-mode Popen on the
+    $BIN production interpreter; the two readline()s are wrapped in the
+    fleet deadline helper read_line_with_timeout — a timeout guard, not a
+    skeleton deviation (crtsh T05:79 precedent). Pins the §1 reconfigure
+    guard (server.py:11) present since T04."""
+    p = subprocess.Popen([BIN_PY, str(SERVER)], stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        discover_line_json = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "server/discover"})
+        tools_list_line_json = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        p.stdin.write(b"\xff\xfe\x00garbage\n")                      # G — pre-stream invalid UTF-8
+        p.stdin.write(discover_line_json.encode() + b"\n"); p.stdin.flush()   # D
+        raw1 = read_line_with_timeout(p.stdout, READ_TIMEOUT)
+        assert raw1 is not None, "pre-stream invalid UTF-8 killed the server (no response to id 1)"
+        resp = json.loads(raw1)
+        assert resp["id"] == 1 and resp["result"]["supportedVersions"] == ["2026-07-28"]
+        p.stdin.write(b"\x00\xff\n")                                 # G — mid-stream garbage
+        p.stdin.write(tools_list_line_json.encode() + b"\n"); p.stdin.flush()  # L
+        raw2 = read_line_with_timeout(p.stdout, READ_TIMEOUT)
+        assert raw2 is not None, "mid-stream invalid UTF-8 killed the server (no response to id 2)"
+        resp2 = json.loads(raw2)                                     # id==2 proves no phantom response to G
+        assert resp2["id"] == 2 and "result" in resp2
+        assert p.poll() is None
+        p.stdin.close(); assert p.wait(timeout=5) == 0               # clean EOF exit
+    finally:
+        if p.poll() is None: p.kill(); p.wait()
