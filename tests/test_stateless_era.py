@@ -140,6 +140,11 @@ def test_discover_era_shape():
         assert result["resultType"] == "complete"
         assert result["ttlMs"] == 0
         assert result["cacheScope"] == "private"
+        # T07: the spec-recommended serverInfo stamp (REFERENCE §2 verified
+        # wire shape). Version 1.1.0 is introduced here — the repo never had
+        # a version string pre-migration (fastmcp self-reported 3.4.7).
+        assert result["_meta"]["io.modelcontextprotocol/serverInfo"] == {
+            "name": "phone-location", "version": "1.1.0"}
     finally:
         srv.kill()
 
