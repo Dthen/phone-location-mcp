@@ -28,3 +28,40 @@ servers are the live production gateway session, untouched pre-cutover).
 Zero fixes needed: server.py and tests untouched by this gate. Cutover target line is
 PROVEN per _chain.md § Cutover note — D.1 may flip config to `/usr/bin/python3` +
 `protocol: stateless` (target stanza per handoff note).
+
+---
+
+
+## ERA REWRITE SUMMARY — stdlib server (T03–T09)
+
+The server is now a pure-Python stdlib MCP loop (REFERENCE §1–§7 pattern): fastmcp 3.4.7
+framework shed, `pyproject`/venv never existed for it to leave. Wire contract pinned by
+characterization against the legacy server before the rewrite (golden/ + T02/T06): two
+tools `get`/`summary`, string passthrough (sanctioned R3 DEVIATION from REFERENCE §5
+dict-wrapping; both tools return str), no outputSchema, no structuredContent post-migration.
+ServerInfo is `phone-location 1.1.0` (T07 — the card's "1.0.0" never existed in any tracked
+file; legacy fastmcp self-reported 3.4.7). Era protocol `2026-07-28`, stateless-first
+(auto route: initialize→-32601→server/discover). Zero-deps proven by the T09 stdlib-only
+import scan + `/usr/bin/python3` import/runability proof (R5: no memory metric). `receiver.py`
+out of era scope — plain-stdlib GPSLogger HTTP sidecar, not an MCP server, untouched.
+Suite at HEAD: 29 passed.
+
+## CUTOVER HAND-OFF STANZA (for D.1; final freeze in T12)
+
+Config flip is D.1's job in its single restart window — this chain NEVER edits
+`~/.hermes/config.yaml` and never deletes the mcp-venv (instant rollback).
+
+```
+server key:  phone-location
+current (config.yaml:842-846):
+  command: /mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3
+  args:    [/home/kimbo/projects/phone-location-mcp/server.py]
+target after this migration (post-rewrite server is stdlib-only, runs anywhere ≥3.10):
+  command: /usr/bin/python3            # Python 3.12.3 on this host — pinned, like PLAN F4 does for transitous
+  args:    [/home/kimbo/projects/phone-location-mcp/server.py]
+  protocol: stateless
+```
+
+T10's scratch-HERMES_HOME gate PROVED this exact line (auto + stateless: `✓ Connected` +
+`✓ Tools discovered: 2`, stdout-judged). Version tag/push are owner-gated (R4): local
+commits only, no tag in this chain, no pushes.

@@ -10,17 +10,24 @@ AI Agent ──stdio──▶ server.py (MCP) ───────────�
 
 ## Setup
 
-Install dependencies: `pip install fastmcp`
+Requirements: Python ≥ 3.10 with nothing but the standard library — `server.py` and
+`receiver.py` have zero third-party dependencies (`/usr/bin/python3 server.py` just runs).
+(The pre-2026 server needed `pip install fastmcp`; the stdlib-era rewrite dropped the
+framework — see `MIGRATION-NOTES.md`.)
 
-**Receiver** — run `receiver.py` on a machine your phone can reach. Open port 8765/tcp (Tailscale-only recommended).
+**Receiver** — run `receiver.py` on a machine your phone can reach; unchanged and plain
+stdlib, since it is a GPSLogger HTTP sidecar, not an MCP server. Open port 8765/tcp
+(Tailscale-only recommended).
 
-**MCP server** — add to your agent's MCP config:
+**MCP server** — add to your agent's MCP config (stdio, MCP protocol era `2026-07-28`,
+stateless):
 ```yaml
 mcp_servers:
   phone-location:
-    command: python3
+    command: /usr/bin/python3
     args:
-      - ./server.py
+      - /home/kimbo/projects/phone-location-mcp/server.py
+    protocol: stateless
     enabled: true
 ```
 
