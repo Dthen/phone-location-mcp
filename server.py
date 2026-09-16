@@ -2,6 +2,7 @@
 """MCP server for phone GPS location — reads data stored by the GPSLogger receiver."""
 
 import json, sys
+import os
 import urllib.request
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -23,11 +24,41 @@ def era_result(payload):
     out["_meta"] = RESULT_META
     return out
 
-# ── Tools layer (T04: placeholder wiring only; T05 attaches the real surface) ──
+# ── Tools layer (T05: frozen surface + string passthrough, R3) ─────────────
 
-DATA_FILE = Path(__file__).parent / "phone-location.json"
+# Test seam (card mandate: "tests must route canned paths, never live state"):
+# PHONE_LOCATION_DATA_FILE routes get/summary at a canned path. Production
+# behavior is byte-identical when the env is unset; tests + the D.1 cutover
+# config never need the env beyond what the era suite already pins.
+DATA_FILE = Path(os.environ.get(
+    "PHONE_LOCATION_DATA_FILE", str(Path(__file__).parent / "phone-location.json")))
 
-TOOLS = []  # T05 replaces: [{"name","description","inputSchema"}] byte-frozen from golden/phone-location.tools.json
+# Byte-frozen from golden/phone-location.tools.json (D4): names/descriptions/
+# inputSchema verbatim; outputSchema and _meta NOT carried (D3 trap, REFERENCE §4).
+TOOLS = [
+    {
+        "name": "get",
+        "description": "Get the phone's current GPS location with full detail.\n\n"
+                       "Returns a JSON object with lat, lon, accuracy, speed, bearing, altitude,\n"
+                       "provider, age, freshness, and a reverse-geocoded address. Use for structured data.",
+        "inputSchema": {
+            "additionalProperties": False,
+            "properties": {},
+            "type": "object",
+        },
+    },
+    {
+        "name": "summary",
+        "description": "Get a quick human-readable summary of where the phone is right now.\n\n"
+                       "Returns one line: address, coordinates, accuracy, and how long the phone\n"
+                       "has been at that location. Use for simple queries.",
+        "inputSchema": {
+            "additionalProperties": False,
+            "properties": {},
+            "type": "object",
+        },
+    },
+]
 
 
 def _load():
@@ -127,7 +158,12 @@ def summary() -> str:
 
 
 def handle_call(name, args):
-    # T05 replaces this placeholder with the real get/summary dispatch.
+    # Both tools take no arguments (frozen inputSchema: empty properties).
+    # They return str — the legacy blobs/lines pass through verbatim (R3).
+    if name == "get":
+        return get()
+    if name == "summary":
+        return summary()
     return {"error": f"Unknown tool: {name}"}
 
 # ── MCP JSON-RPC loop (REFERENCE §1 skeleton verbatim; stateless-only D2) ──
@@ -161,7 +197,9 @@ def main():
             try:
                 result = handle_call(params["name"], params.get("arguments", {}))
                 is_err = isinstance(result, dict) and ("error" in result or "transport_error" in result)
-                payload: dict = {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+                # DEVIATION from REFERENCE §5 (justified: both tools returned str on the legacy server — frozen T02 behavior is the contract; dict-wrapping would change bytes; R3 string-passthrough precedent)
+                text = result if isinstance(result, str) else json.dumps(result, indent=2)
+                payload: dict = {"content": [{"type": "text", "text": text}]}
                 if is_err:
                     payload["isError"] = True
                 send({"jsonrpc":"2.0","id":rid,"result":era_result(payload)})
