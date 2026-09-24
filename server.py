@@ -69,11 +69,11 @@ TOOLS = [
 
 def _load():
     if not DATA_FILE.exists():
-        return None
+        return None, None
     try:
-        return json.loads(DATA_FILE.read_text())
+        return json.loads(DATA_FILE.read_text()), None
     except (json.JSONDecodeError, OSError):
-        return None
+        return None, INVALID_LOCATION_DATA
 
 
 def _plural(n, word):
@@ -115,7 +115,9 @@ def _reverse_geocode(lat, lon):
 
 def _validated_data():
     """Return location data or a stable tool-level error for bad input."""
-    data = _load()
+    data, load_error = _load()
+    if load_error is not None:
+        return None, {"error": load_error}
     if data is None:
         return None, {
             "error": "No location data available yet — the phone has not reported in.",

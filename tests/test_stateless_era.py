@@ -608,6 +608,24 @@ def test_tools_call_unknown_properties_are_tool_errors():
         srv.cleanup()
 
 
+def test_get_unknown_json_shape_is_normalized_to_tool_error(tmp_path):
+    """An invalid JSON document is malformed data, not the documented
+    not-yet-reported no-data success text."""
+    location_file = tmp_path / "invalid.json"
+    location_file.write_text("not json", encoding="utf-8")
+    srv = _spawn({"PHONE_LOCATION_DATA_FILE": str(location_file)})
+    try:
+        resp = srv.rpc("tools/call", {"name": "get", "arguments": {}})
+        assert resp is not None
+        assert "result" in resp, resp
+        assert resp["result"]["isError"] is True
+        text = resp["result"]["content"][0]["text"]
+        assert "malformed" in text.lower()
+        assert "no location data" not in text.lower()
+    finally:
+        srv.cleanup()
+
+
 def test_malformed_location_data_is_normalized_to_tool_error(tmp_path):
     """Malformed JSON data and expected location/timestamp failures stay in
     the tool layer: result + isError, no -32603 and no exception text."""
