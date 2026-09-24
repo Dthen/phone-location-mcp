@@ -35,6 +35,12 @@ DATA_FILE = Path(os.environ.get(
 
 # Byte-frozen from golden/phone-location.tools.json (D4): names/descriptions/
 # inputSchema verbatim; outputSchema and _meta NOT carried (D3 trap, REFERENCE §4).
+LOCATION_FIELDS = (
+    "lat", "lon", "accuracy_m", "speed_kmh", "bearing", "altitude_m",
+    "provider", "timestamp_utc", "received_at",
+)
+INVALID_LOCATION_DATA = "Location data is malformed or incomplete. Check the phone location receiver."
+
 TOOLS = [
     {
         "name": "get",
@@ -76,6 +82,8 @@ def _plural(n, word):
 
 def _age(data):
     received = datetime.fromisoformat(data["received_at"])
+    if received.tzinfo is None:
+        raise ValueError("received_at must include a timezone")
     seconds = (datetime.now(timezone.utc) - received).total_seconds()
     if seconds < 60:
         return round(seconds), f"at this location for {_plural(int(seconds), 'second')}"
@@ -105,19 +113,43 @@ def _reverse_geocode(lat, lon):
         return ""
 
 
-def get() -> str:
+def _validated_data():
+    """Return location data or a stable tool-level error for bad input."""
+    data = _load()
+    if data is None:
+        return None, {
+            "error": "No location data available yet — the phone has not reported in.",
+            "hint": "Ensure GPSLogger is running on the phone and has an active GPS fix.",
+        }
+    try:
+        if not isinstance(data, dict) or any(field not in data for field in LOCATION_FIELDS):
+            return None, {"error": INVALID_LOCATION_DATA}
+        # Validate all expected scalar/timestamp access before reverse geocoding
+        # or formatting, so malformed mutable state cannot escape as -32603.
+        _age(data)
+        for field in ("lat", "lon", "accuracy_m", "speed_kmh", "bearing", "altitude_m"):
+            value = data[field]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None, {"error": INVALID_LOCATION_DATA}
+        if not isinstance(data["provider"], str) or not isinstance(data["timestamp_utc"], str):
+            return None, {"error": INVALID_LOCATION_DATA}
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None, {"error": INVALID_LOCATION_DATA}
+    return data, None
+
+
+def get():
     """Get the phone's current GPS location with full detail.
 
     Returns a JSON object with lat, lon, accuracy, speed, bearing, altitude,
     provider, age, freshness, and a reverse-geocoded address. Use for structured data."""
 
-    data = _load()
+    data, error = _validated_data()
 
-    if data is None:
-        return json.dumps({
-            "error": "No location data available yet — the phone has not reported in.",
-            "hint": "Ensure GPSLogger is running on the phone and has an active GPS fix."
-        })
+    if error is not None:
+        if error["error"] == INVALID_LOCATION_DATA:
+            return error
+        return json.dumps(error)
 
     age_s, freshness = _age(data)
     place = _reverse_geocode(data["lat"], data["lon"])
@@ -137,16 +169,21 @@ def get() -> str:
     }, indent=2)
 
 
-def summary() -> str:
+def summary():
     """Get a quick human-readable summary of where the phone is right now.
 
     Returns one line: address, coordinates, accuracy, and how long the phone
     has been at that location. Use for simple queries."""
 
-    data = _load()
+    data, error = _validated_data()
 
-    if data is None:
-        return "No location data yet — the phone hasn't reported in. Make sure GPSLogger is running and has a GPS fix."
+    if error is not None:
+        if error["error"] == INVALID_LOCATION_DATA:
+            return {"error": INVALID_LOCATION_DATA}
+        return (
+            "No location data yet — the phone hasn't reported in. "
+            "Make sure GPSLogger is running and has a GPS fix."
+        )
 
     age_s, freshness = _age(data)
     place = _reverse_geocode(data["lat"], data["lon"])
@@ -160,11 +197,12 @@ def summary() -> str:
 def handle_call(name, args):
     # Both tools take no arguments (frozen inputSchema: empty properties).
     # They return str — the legacy blobs/lines pass through verbatim (R3).
-    if name == "get":
-        return get()
-    if name == "summary":
-        return summary()
-    return {"error": f"Unknown tool: {name}"}
+    if name not in ("get", "summary"):
+        return {"error": f"Unknown tool: {name}"}
+    if args:
+        keys = ", ".join(sorted(str(key) for key in args))
+        return {"error": f"Unexpected argument(s) for {name}: {keys}"}
+    return get() if name == "get" else summary()
 
 # ── MCP JSON-RPC loop (REFERENCE §1 skeleton verbatim; stateless-only D2) ──
 
@@ -195,8 +233,13 @@ def main():
                 send({"jsonrpc":"2.0","id":rid,"error":{"code":-32602,
                     "message":"missing required param: params (with string 'name')"}})
                 continue
+            args = params.get("arguments", {})
+            if not isinstance(args, dict):
+                send({"jsonrpc":"2.0","id":rid,"error":{"code":-32602,
+                    "message":"Invalid request parameters: arguments must be an object"}})
+                continue
             try:
-                result = handle_call(params["name"], params.get("arguments", {}))
+                result = handle_call(params["name"], args)
                 is_err = isinstance(result, dict) and ("error" in result or "transport_error" in result)
                 # DEVIATION from REFERENCE §5 (justified: both tools returned str on the legacy server — frozen T02 behavior is the contract; dict-wrapping would change bytes; R3 string-passthrough precedent)
                 text = result if isinstance(result, str) else json.dumps(result, indent=2)

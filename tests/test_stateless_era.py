@@ -58,6 +58,33 @@ def read_line_with_timeout(f, sec):
     return f.readline()
 
 
+def _close_pipe(pipe):
+    """Close one subprocess pipe without masking the test outcome."""
+    if pipe is None:
+        return
+    try:
+        pipe.close()
+    except OSError:
+        pass
+
+
+def cleanup_process(proc):
+    """Signal EOF, reap the child, and close every captured pipe."""
+    try:
+        _close_pipe(proc.stdin)
+        if proc.poll() is None:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+    finally:
+        try:
+            _close_pipe(proc.stdout)
+        finally:
+            _close_pipe(proc.stderr)
+
+
 class EraServer:
     """Spawned server over stdio + line-oriented JSON-RPC with deadlines.
 
@@ -112,12 +139,11 @@ class EraServer:
         return self.proc.poll() is None
 
     def close_stdin(self):
-        self.proc.stdin.close()
+        if self.proc.stdin is not None:
+            self.proc.stdin.close()
 
-    def kill(self):
-        if self.proc.poll() is None:
-            self.proc.kill()
-            self.proc.wait()
+    def cleanup(self):
+        cleanup_process(self.proc)
 
 
 def _spawn(env=None):
@@ -146,7 +172,7 @@ def test_discover_era_shape():
         assert result["_meta"]["io.modelcontextprotocol/serverInfo"] == {
             "name": "phone-location", "version": "1.1.0"}
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_discover_paramless():
@@ -157,7 +183,7 @@ def test_discover_paramless():
         assert resp is not None, "paramless server/discover answered nothing"
         assert resp["result"]["supportedVersions"] == [ERA_VERSION]
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 # ---------------------------------------------------------------------- 3.
@@ -180,7 +206,7 @@ def test_initialize_rejected_32601_same_pipe_discover():
         assert disc["result"]["supportedVersions"] == [ERA_VERSION]
         assert srv.alive(), "server must not exit on a rejected method"
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 # ------------------------------------------------------------------ 4. + 5.
@@ -199,7 +225,7 @@ def test_tools_list_era_triple():
         assert result["cacheScope"] == "private"
         assert len(result["tools"]) == 2
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_tools_list_has_no_output_schema():
@@ -214,7 +240,7 @@ def test_tools_list_has_no_output_schema():
         assert all("outputSchema" not in t for t in tools), (
             "migrated listing must not carry outputSchema")
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_tools_list_golden_byte_identity():
@@ -250,7 +276,7 @@ def test_tools_list_golden_byte_identity():
         assert listed == expected, "tools surface drifted from the frozen golden"
         assert all("outputSchema" not in t for t in resp["result"]["tools"])
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 # ----------------------------------------------------------------- 6. and 7.
@@ -277,7 +303,7 @@ def test_tools_call_era_triple_and_text_passthrough():
         assert "No location data" in texts[0]["text"], (
             "canned no-data text missing -> data seam not honored")
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_tools_call_unknown_tool_is_error_result():
@@ -296,7 +322,7 @@ def test_tools_call_unknown_tool_is_error_result():
         joined = "".join(c.get("text", "") for c in result["content"])
         assert "Unknown tool" in joined
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 # -------------------------------------------------------------- 8., 9., 10..
@@ -311,7 +337,7 @@ def test_ping_answers_empty_object():
         assert resp["result"] == {}
         assert srv.alive()
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_unknown_method_32601():
@@ -323,7 +349,7 @@ def test_unknown_method_32601():
         assert resp["error"]["code"] == -32601
         assert srv.alive()
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_notifications_initialized_swallowed():
@@ -341,7 +367,7 @@ def test_notifications_initialized_swallowed():
             "id mismatch: the server emitted a phantom response to the notification")
         assert resp["result"] == {}
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_id_less_known_requests_are_swallowed():
@@ -367,7 +393,31 @@ def test_id_less_known_requests_are_swallowed():
         )
         assert srv.alive()
     finally:
-        srv.kill()
+        srv.cleanup()
+
+
+def test_explicit_null_id_is_answered_for_known_methods():
+    """A JSON-RPC request that explicitly includes id:null still receives
+    a response; the absent-id notification guard must not collapse null."""
+    srv = _spawn()
+    try:
+        for mid, method, params in (
+            (None, "server/discover", None),
+            (None, "tools/list", None),
+            (None, "tools/call", {"name": "summary", "arguments": {}}),
+            (None, "ping", None),
+        ):
+            msg = {"jsonrpc": "2.0", "id": mid, "method": method}
+            if params is not None:
+                msg["params"] = params
+            srv.send(msg)
+            resp = srv.read()
+            assert resp is not None, f"{method}: explicit null id was not answered"
+            assert resp["id"] is None
+            assert "result" in resp
+        assert srv.alive()
+    finally:
+        srv.cleanup()
 
 
 # -------------------------------------------------------------------- 12..
@@ -381,7 +431,7 @@ def test_eof_clean_exit_zero():
         rc = srv.proc.wait(timeout=5)
         assert rc == 0, f"EOF exit must be clean rc=0, got {rc}"
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 # ============================================================ T08 regressions
@@ -406,7 +456,7 @@ def test_garbage_lines_do_not_kill_the_server():
         assert resp["result"]["supportedVersions"] == [ERA_VERSION]
         assert srv.alive(), "server must survive non-JSON garbage lines"
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_non_dict_json_lines_do_not_kill_the_server():
@@ -426,7 +476,7 @@ def test_non_dict_json_lines_do_not_kill_the_server():
         assert "result" in resp, f"expected a result, got {resp}"
         assert srv.alive(), "server must survive non-dict JSON lines"
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_non_string_method_routes_as_unknown_method():
@@ -451,7 +501,7 @@ def test_non_string_method_routes_as_unknown_method():
                 f"request id 7, got {line}")
         assert srv.alive(), "server must survive non-string method values"
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_id_less_unknown_request_answered_by_nothing():
@@ -470,7 +520,7 @@ def test_id_less_unknown_request_answered_by_nothing():
         assert resp["result"] == {}
         assert srv.alive()
     finally:
-        srv.kill()
+        srv.cleanup()
 
 
 def test_tools_call_missing_params_gets_minus_32602():
@@ -505,7 +555,119 @@ def test_tools_call_missing_params_gets_minus_32602():
                 f"{label}: response id must echo request id {mid}, got {line}")
         assert srv.alive(), "server must survive missing/non-dict params"
     finally:
-        srv.kill()
+        srv.cleanup()
+
+
+def test_tools_call_non_object_arguments_get_minus_32602():
+    """Each frozen no-argument tool rejects non-object arguments at the
+    protocol boundary instead of executing its handler."""
+    srv = _spawn()
+    try:
+        mid = 0
+        for tool in ("get", "summary"):
+            for arguments in ([], "bad", 42, None):
+                mid += 1
+                srv.send({
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                })
+                resp = srv.read()
+                assert resp is not None
+                assert resp.get("error", {}).get("code") == -32602, resp
+                assert resp["id"] == mid
+        assert srv.alive()
+    finally:
+        srv.cleanup()
+
+
+def test_tools_call_unknown_properties_are_tool_errors():
+    """additionalProperties=false means extra keys are a normal tool-level
+    error result, never a successful execution or a JSON-RPC error."""
+    srv = _spawn()
+    try:
+        mid = 0
+        for tool in ("get", "summary"):
+            mid += 1
+            srv.send({
+                "jsonrpc": "2.0",
+                "id": mid,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": {"unexpected": True}},
+            })
+            resp = srv.read()
+            assert resp is not None
+            assert "result" in resp, resp
+            assert resp["id"] == mid
+            assert resp["result"]["isError"] is True
+            text = resp["result"]["content"][0]["text"]
+            assert "unexpected" in text
+        assert srv.alive()
+    finally:
+        srv.cleanup()
+
+
+def test_malformed_location_data_is_normalized_to_tool_error(tmp_path):
+    """Malformed JSON data and expected location/timestamp failures stay in
+    the tool layer: result + isError, no -32603 and no exception text."""
+    cases = {
+        "empty object": {},
+        "json list": [55.0, -3.0],
+        "missing received_at": {
+            "lat": 55.0, "lon": -3.0, "accuracy_m": 5,
+            "speed_kmh": 0, "bearing": 0, "altitude_m": 0,
+            "provider": "test", "timestamp_utc": "2026-09-24T12:00:00+00:00",
+        },
+        "invalid received_at": {
+            "lat": 55.0, "lon": -3.0, "accuracy_m": 5,
+            "speed_kmh": 0, "bearing": 0, "altitude_m": 0,
+            "provider": "test", "timestamp_utc": "2026-09-24T12:00:00+00:00",
+            "received_at": "not-a-timestamp",
+        },
+        "missing coordinate": {
+            "lon": -3.0, "accuracy_m": 5, "speed_kmh": 0,
+            "bearing": 0, "altitude_m": 0,
+            "provider": "test", "timestamp_utc": "2026-09-24T12:00:00+00:00",
+            "received_at": "2026-09-24T12:00:00+00:00",
+        },
+        "timezone-free received_at": {
+            "lat": 55.0, "lon": -3.0, "accuracy_m": 5, "speed_kmh": 0,
+            "bearing": 0, "altitude_m": 0,
+            "provider": "test", "timestamp_utc": "2026-09-24T12:00:00+00:00",
+            "received_at": "2026-09-24T12:00:00",
+        },
+        "non-numeric accuracy": {
+            "lat": 55.0, "lon": -3.0, "accuracy_m": "unknown",
+            "speed_kmh": 0, "bearing": 0, "altitude_m": 0,
+            "provider": "test", "timestamp_utc": "2026-09-24T12:00:00+00:00",
+            "received_at": "2026-09-24T12:00:00+00:00",
+        },
+    }
+    mid = 0
+    for label, data in cases.items():
+        location_file = tmp_path / f"{label.replace(' ', '_')}.json"
+        location_file.write_text(json.dumps(data), encoding="utf-8")
+        for tool in ("get", "summary"):
+            mid += 1
+            clean = _spawn({"PHONE_LOCATION_DATA_FILE": str(location_file)})
+            try:
+                clean.send({
+                    "jsonrpc": "2.0", "id": mid, "method": "tools/call",
+                    "params": {"name": tool, "arguments": {}},
+                })
+                resp = clean.read()
+                assert resp is not None, f"{label}/{tool}: no response"
+                assert "result" in resp, f"{label}/{tool}: {resp}"
+                assert resp["id"] == mid
+                assert resp["result"]["isError"] is True
+                text = resp["result"]["content"][0]["text"]
+                assert "location data" in text.lower()
+                assert "Traceback" not in text
+                assert "KeyError" not in text
+                assert "not-a-timestamp" not in text
+            finally:
+                clean.cleanup()
 
 
 def test_binary_garbage_line_does_not_kill_the_server():
@@ -535,4 +697,4 @@ def test_binary_garbage_line_does_not_kill_the_server():
         assert p.poll() is None
         p.stdin.close(); assert p.wait(timeout=5) == 0               # clean EOF exit
     finally:
-        if p.poll() is None: p.kill(); p.wait()
+        cleanup_process(p)

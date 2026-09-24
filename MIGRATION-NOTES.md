@@ -18,11 +18,13 @@ only a server name): `$BIN server.py` driven over stdio with canned env
 `tools/call summary` returned the T02-recorded no-data string verbatim as
 `content[0].text` (string passthrough, no structuredContent).
 
-Gate hygiene: scratch configs lived under the task workspace and were deleted after the
-run; `~/.hermes/config.yaml` byte-unchanged (md5 `00538b0109637aecbb56ac17453268be` before
-and after, captured IN TASK); no `~/.hermes/config.yaml.new`; zero leftover probe-spawned
-server processes (`/usr/bin/python3 .../server.py` — all `mcp-venvs/.../bin/python3`
-matches are pre-existing production gateway sessions, untouched pre-cutover).
+Gate hygiene: the 2026-09-16 gate left `~/.hermes/config.yaml` byte-unchanged at
+md5 `00538b0109637aecbb56ac17453268be` (captured in that task); the 2026-09-24 RC
+re-verification observed the then-current file at md5
+`d79831aec6f3d9347a77f1b8a4b8dcd4` before and after both scratch probes. No
+`~/.hermes/config.yaml.new`; zero leftover probe-spawned server processes
+(`/usr/bin/python3 .../server.py` — all `mcp-venvs/.../bin/python3` matches are
+pre-existing production gateway sessions, untouched pre-cutover).
 
 Zero fixes needed: server.py and tests untouched by this gate. Cutover target line is
 PROVEN per _chain.md § Cutover note — D.1 may flip config to `/usr/bin/python3` +
@@ -54,11 +56,12 @@ non-null, age was under 24 hours, and the summary agreed with the structured
 result. This is a bounded local data-contract check, not cutover F2 fleet
 acceptance; no live phone API/tool-use claim is made here.
 
-The stdlib import scan and `/usr/bin/python3` import proof remain clean. The only
-release repair is the JSON-RPC notification guard in `server.py` plus its
-regression test and the hermetic data-contract test; README and this addendum
-now describe the actual result fields instead of the pre-migration maps-link
-wording. No release tag was created.
+The stdlib import scan and `/usr/bin/python3` import proof remain clean. The release
+repairs are the JSON-RPC notification guard, frozen no-argument schema validation,
+tool-level normalization of malformed location data, and the hermetic data-contract
+and resource-cleanup regressions; README and this addendum describe the actual
+result fields instead of the pre-migration maps-link wording. No release tag was
+created.
 
 ## CUTOVER HAND-OFF STANZA (for D.1; final freeze in T12)
 
@@ -67,7 +70,7 @@ Config flip is D.1's job in its single restart window — this chain NEVER edits
 
 ```
 server key:  phone-location
-current (live config read 2026-09-24; line numbers drift):
+current (config.yaml:842-846):
   command: /mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3
   args:    [/home/kimbo/projects/phone-location-mcp/server.py]
 target after this migration (post-rewrite server is stdlib-only, runs anywhere ≥3.10):
