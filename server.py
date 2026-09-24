@@ -181,6 +181,7 @@ def main():
         if not isinstance(req, dict): continue  # valid JSON, not an object ("5", null, [1,2]): skip, NEVER die (§7)
         rid = req.get("id")                     # str or int; absent ⇒ notification
         method = req.get("method")              # null/42/etc must not crash .startswith below
+        if "id" not in req: continue            # JSON-RPC notification: never respond
         if not isinstance(method, str): method = ""   # route as unknown-method
         if method == "server/discover":
             send({"jsonrpc":"2.0","id":rid,"result":era_result({

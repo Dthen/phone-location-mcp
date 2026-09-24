@@ -1,16 +1,15 @@
 # MIGRATION NOTES — phone-location-mcp (mcp-2x migration, chain B.1)
 
-## PROBE-GATE PASS — 2026-09-16 (T10, scratch HERMES_HOME live gate)
+## PROBE-GATE PASS — 2026-09-24 (RC re-verification, scratch HERMES_HOME live gate)
 
-`hermes mcp test phone-location` run under BOTH scratch configs spawning the cutover
-TARGET command line `/usr/bin/python3 /home/kimbo/projects/phone-location-mcp/server.py`
-(Python 3.12.3, post-rewrite stdlib-only server at HEAD dd99f68). PASS judged by stdout
-(recipe 1 — never the exit code):
+`hermes mcp test phone-location` was re-run under BOTH scratch configs spawning the
+cutover TARGET command line `/usr/bin/python3 /home/kimbo/projects/phone-location-mcp/server.py`
+(Python 3.12.3). PASS judged by stdout (never the exit code):
 
 - auto (no `protocol` key; initialize→-32601→discover path):
-  `✓ Connected (1573ms)` + `✓ Tools discovered: 2`
+  `✓ Connected (1577ms)` + `✓ Tools discovered: 2`
 - stateless (`protocol: stateless`):
-  `✓ Connected (1655ms)` + `✓ Tools discovered: 2`
+  `✓ Connected (1679ms)` + `✓ Tools discovered: 2`
 
 Call-shape evidence (R6: no live tools/call through the probe — `hermes mcp test` takes
 only a server name): `$BIN server.py` driven over stdio with canned env
@@ -44,7 +43,22 @@ file; legacy fastmcp self-reported 3.4.7). Era protocol `2026-07-28`, stateless-
 (auto route: initialize→-32601→server/discover). Zero-deps proven by the T09 stdlib-only
 import scan + `/usr/bin/python3` import/runability proof (R5: no memory metric). `receiver.py`
 out of era scope — plain-stdlib GPSLogger HTTP sidecar, not an MCP server, untouched.
-Suite at HEAD: 29 passed.
+Suite at HEAD: 31 passed.
+
+## RC verification addendum — 2026-09-24
+
+The release-candidate audit re-ran the full current suite (31 passed) and a fresh
+isolated `git clone --no-local` (31 passed). It also exercised the real writable
+`phone-location.json` through `get` and `summary`: coordinates were in range and
+non-null, age was under 24 hours, and the summary agreed with the structured
+result. This is a bounded local data-contract check, not cutover F2 fleet
+acceptance; no live phone API/tool-use claim is made here.
+
+The stdlib import scan and `/usr/bin/python3` import proof remain clean. The only
+release repair is the JSON-RPC notification guard in `server.py` plus its
+regression test and the hermetic data-contract test; README and this addendum
+now describe the actual result fields instead of the pre-migration maps-link
+wording. No release tag was created.
 
 ## CUTOVER HAND-OFF STANZA (for D.1; final freeze in T12)
 
@@ -53,7 +67,7 @@ Config flip is D.1's job in its single restart window — this chain NEVER edits
 
 ```
 server key:  phone-location
-current (config.yaml:842-846):
+current (live config read 2026-09-24; line numbers drift):
   command: /mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3
   args:    [/home/kimbo/projects/phone-location-mcp/server.py]
 target after this migration (post-rewrite server is stdlib-only, runs anywhere ≥3.10):
@@ -78,7 +92,7 @@ Card B.1 claims vs live-verified facts — reconciled at chain end:
 | Card B.1: R1 TimeoutError-pin | N/A — urllib-native, never httpx; `grep -rn httpx` zero hits; no shim | N/A with evidence |
 | Card B.1: golden byte-identity | MET — golden/phone-location.tools.json tracked, byte-identity asserted in T05 freeze test | MET |
 | Card B.1: hermes mcp test | MET — T10 scratch HERMES_HOME auto+stateless gate PASS (stdout-judged) | MET |
-| Card B.1: pytest | MET — 29 passed (repo + fresh clone) | MET |
+| Card B.1: pytest | MET — 31 passed (repo + fresh clone) | MET |
 | Card B.1: reviews | MET — one review round per task, all approved | MET |
 
 Golden/fixture provenance: golden/phone-location.tools.json (T00, tracked spec),

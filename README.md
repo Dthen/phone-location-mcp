@@ -39,9 +39,11 @@ Method: GET.
 
 ## MCP tools
 
-`get` — full JSON: coordinates, accuracy, speed, bearing, altitude, freshness, maps link.
+`get` — full JSON containing coordinates, accuracy, speed, bearing, altitude,
+GPS timestamp, age/freshness, and a reverse-geocoded place.
 
-`summary` — one line: "Phone was at 55.47, -4.59 (±14m) 2 minutes ago" + maps link.
+`summary` — one human-readable line with reverse-geocoded place, coordinates,
+accuracy, and freshness.
 
 ## License
 

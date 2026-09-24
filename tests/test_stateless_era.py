@@ -344,6 +344,32 @@ def test_notifications_initialized_swallowed():
         srv.kill()
 
 
+def test_id_less_known_requests_are_swallowed():
+    """Known methods are still notifications when they have no id.
+
+    The framing rule applies to every JSON-RPC notification, not only to the
+    ``notifications/*`` namespace. A response for any of these messages would
+    carry id=null and corrupt the next request's correlation.
+    """
+    srv = _spawn()
+    try:
+        for method, params in (
+            ("server/discover", {}),
+            ("tools/list", {}),
+            ("tools/call", {"name": "summary", "arguments": {}}),
+            ("ping", {}),
+        ):
+            srv.send({"jsonrpc": "2.0", "method": method, "params": params})
+        resp = srv.rpc("ping", msg_id=9)
+        assert resp is not None, "server answered nothing after id-less known requests"
+        assert resp["id"] == 9, (
+            f"id-less known request produced a phantom response: got {resp!r}"
+        )
+        assert srv.alive()
+    finally:
+        srv.kill()
+
+
 # -------------------------------------------------------------------- 12..
 
 
