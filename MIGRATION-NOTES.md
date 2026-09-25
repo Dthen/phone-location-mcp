@@ -45,12 +45,13 @@ file; legacy fastmcp self-reported 3.4.7). Era protocol `2026-07-28`, stateless-
 (auto route: initialize→-32601→server/discover). Zero-deps proven by the T09 stdlib-only
 import scan + `/usr/bin/python3` import/runability proof (R5: no memory metric). `receiver.py`
 out of era scope — plain-stdlib GPSLogger HTTP sidecar, not an MCP server, untouched.
-Suite at HEAD: 31 passed.
+Suite at HEAD: 36 passed.
 
 ## RC verification addendum — 2026-09-24
 
-The release-candidate audit re-ran the full current suite (31 passed) and a fresh
-isolated `git clone --no-local` (31 passed). It also exercised the real writable
+The release-candidate audit re-ran the full current source suite (36 passed under
+warnings-as-errors) and a fresh isolated `git clone --no-local` (36 passed under
+warnings-as-errors). It also exercised the real writable
 `phone-location.json` through `get` and `summary`: coordinates were in range and
 non-null, age was under 24 hours, and the summary agreed with the structured
 result. This is a bounded local data-contract check, not cutover F2 fleet
@@ -95,7 +96,7 @@ Card B.1 claims vs live-verified facts — reconciled at chain end:
 | Card B.1: R1 TimeoutError-pin | N/A — urllib-native, never httpx; `grep -rn httpx` zero hits; no shim | N/A with evidence |
 | Card B.1: golden byte-identity | MET — golden/phone-location.tools.json tracked, byte-identity asserted in T05 freeze test | MET |
 | Card B.1: hermes mcp test | MET — T10 scratch HERMES_HOME auto+stateless gate PASS (stdout-judged) | MET |
-| Card B.1: pytest | MET — 31 passed (repo + fresh clone) | MET |
+| Card B.1: pytest | MET — 36 passed under warnings-as-errors (source repo + fresh isolated clone) | MET |
 | Card B.1: reviews | MET — one review round per task, all approved | MET |
 
 Golden/fixture provenance: golden/phone-location.tools.json (T00, tracked spec),
