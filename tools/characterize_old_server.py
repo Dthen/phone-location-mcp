@@ -2,10 +2,25 @@
 """T02 characterization harness — freeze legacy phone-location MCP tool behavior.
 
 Run with the CURRENT production interpreter ONLY (the one that has fastmcp;
-the post-rewrite server must NOT be imported by this harness):
+the post-rewrite server must NOT be imported by this harness). This harness
+captures against the PRE-migration fastmcp venv, which is NOT the interpreter
+the post-migration server runs under, so it is configured separately from the
+`${PROD_PY}` used by the migrated-era gates:
 
-    /mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3 \
-        /home/kimbo/projects/phone-location-mcp/tools/characterize_old_server.py
+    export PROD_PY_PHONE_LOCATION_OLD=<venv-root>/phone-location-mcp/bin/python3
+    <venv-root>/phone-location-mcp/bin/python3 \
+        <repo-root>/tools/characterize_old_server.py
+
+(or write that same path to the gitignored, untracked pointer file
+`<repo-root>/.prod_py.old`; see tools/prod_py.py for the shared resolver).
+The harness refuses to run unconfigured rather than silently falling back to
+`sys.executable` — a fallback would record provenance for an interpreter that
+was never used to capture, making the artifact a lie.
+
+The paths this harness records into golden/phone-location.behavior.json are
+PORTABLE by construction: repo-relative for in-repo artifacts, and a
+`<venv-root>/...` placeholder for the interpreter. The artifact must be
+identical no matter where the checkout lives or which venv root is used.
 
 It imports server.py IN-PROCESS and records the exact text both tools return
 for 6 cases — get x {data+geocode-hit, data+geocode-fail, no-data} and the same
@@ -53,7 +68,8 @@ is json.dumps(indent=2), `get` error blob default separators, `summary` a plain
 human string. This harness only records whatever bytes the legacy server makes.
 
 Exit status: 0 = all 6 cases recorded; non-zero = any unexpected exception
-(FAIL: printed) or missing/failed internal assertion.
+(FAIL: printed), a missing/failed internal assertion, or an unconfigured
+interpreter (resolved at import, see tools/prod_py.py).
 """
 
 import json
@@ -65,11 +81,47 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tools"))
 
 import server  # in-process under $PYO only — the legacy fastmcp server
 
+from prod_py import prod_py
+
+# The interpreter this capture is CONTRACTUALLY run under (pre-migration
+# fastmcp venv). Resolved at import — deliberately raising rather than skipping
+# when unconfigured, so a misconfigured capture can never masquerade as a real
+# one. Provenance is recorded as a <venv-root>/... placeholder, never the
+# machine's real interpreter path, so the artifact is checkout-independent.
+INTERP = prod_py()
+INTERP_PROVENANCE = f"<venv-root>/{Path(INTERP).parent.parent.name}/bin/{Path(INTERP).name}"
+
+# ENFORCE the contract above rather than assuming it. This harness imports
+# server.py IN-PROCESS, so the interpreter that actually captures the behavior
+# is sys.executable — INTERP is only ever a label. Without this check the
+# artifact could stamp _meta.interpreter_path from the CONFIGURED interpreter
+# while _meta.interpreter records the version of a completely different one
+# that really ran: provenance that silently lies, and the exact failure the
+# resolver exists to prevent. Both paths are resolved() first because a venv's
+# bin/python3 is a symlink to bin/python3.11.
+if Path(INTERP).resolve() != Path(sys.executable).resolve():
+    raise RuntimeError(
+        "Interpreter mismatch: this capture must RUN under the configured "
+        f"pre-migration interpreter ({INTERP_PROVENANCE}), but it is running "
+        f"under Python {sys.version.split()[0]} at a different path. The "
+        "_meta provenance this harness records would describe an interpreter "
+        "that did not produce the capture. Re-run it with the configured "
+        "interpreter, or point the configuration at the one you are using."
+    )
+
 FIXTURE = REPO / "golden" / "phone-location.fixture.json"
 OUT = REPO / "golden" / "phone-location.behavior.json"
+
+# Repo-relative spellings recorded in the artifact's _meta. Both are asserted
+# back by tests/test_characterization.py: the fixture tail-matches the tracked
+# golden/phone-location.fixture.json, so an absolute capture-time path would
+# both leak a host path and fail that tail-match on any other checkout.
+SERVER_PROVENANCE = "server.py"
+FIXTURE_PROVENANCE = "golden/phone-location.fixture.json"
 
 # Fixed "now" = fixture received_at + 3h -> freshness "at this location for 3 hours".
 FIXED_NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=timezone.utc)
@@ -230,11 +282,11 @@ def main():
     artifact = {
         "_meta": {
             "generated_by": "tools/characterize_old_server.py (T02)",
-            "server": str(REPO / "server.py"),
+            "server": SERVER_PROVENANCE,
             "tag": "pre-migration/20260914",
             "interpreter": sys.version.split()[0],
-            "interpreter_path": sys.executable,
-            "fixture": str(FIXTURE),
+            "interpreter_path": INTERP_PROVENANCE,
+            "fixture": FIXTURE_PROVENANCE,
             "pinned_now_utc": FIXED_NOW.isoformat(),
             "fixture_received_at": fixture_data["received_at"],
             "age_seconds_at_pinned_now": age_at_fixed,

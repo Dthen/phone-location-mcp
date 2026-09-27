@@ -1,11 +1,11 @@
 {
   "_meta": {
     "generated_by": "tools/characterize_old_server.py (T02)",
-    "server": "/home/kimbo/projects/phone-location-mcp/server.py",
+    "server": "server.py",
     "tag": "pre-migration/20260914",
     "interpreter": "3.11.15",
-    "interpreter_path": "/mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3",
-    "fixture": "/home/kimbo/projects/phone-location-mcp/golden/phone-location.fixture.json",
+    "interpreter_path": "<venv-root>/phone-location-mcp/bin/python3",
+    "fixture": "golden/phone-location.fixture.json",
     "pinned_now_utc": "2026-09-16T12:00:00+00:00",
     "fixture_received_at": "2026-09-16T09:00:00+00:00",
     "age_seconds_at_pinned_now": 10800,

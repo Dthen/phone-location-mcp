@@ -33,7 +33,15 @@ BIN_PY = "/usr/bin/python3"
 # Repo-root modules shipped files may legitimately import (first-party —
 # tools/characterize_old_server.py does `import server` in-process under the
 # legacy $PYO interpreter; that is not a dependency).
-FIRST_PARTY = {"server", "receiver"}
+#
+# `prod_py` is this repo's own interpreter resolver (tools/prod_py.py), imported
+# by the two pre-migration capture tools. It is first-party for the same reason
+# as `server`/`receiver` — a repo-root module, not a distribution. This entry
+# is NOT a hole in the gate: the scan still walks tools/prod_py.py itself, so
+# the moment it imports anything outside sys.stdlib_module_names (fastmcp, or
+# anything else) this test fails. Adding a first-party name widens the exempt
+# set by exactly one repo-local module, never past the stdlib boundary.
+FIRST_PARTY = {"server", "receiver", "prod_py"}
 
 # Frameworks this migration shed. Non-stdlib already fails the generic scan;
 # these give the "never returns" tripwire a named, self-explaining failure.

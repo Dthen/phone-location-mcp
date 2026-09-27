@@ -1,6 +1,11 @@
 phone-location.json
 __pycache__/
 *.pyc
+# Machine-local interpreter pointers (never tracked — see tools/prod_py.py).
+# Each holds ONE path on one line, resolved only as a fallback for the
+# matching $PROD_PY* env var.
+.prod_py
+.prod_py.old
 # golden/ = tracked characterization specs (recipe 3): ignore everything, un-ignore the JSON specs
 golden/*
 !golden/*.json

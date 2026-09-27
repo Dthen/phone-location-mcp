@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """Golden tools/list capture for phone-location-mcp (D4: capture BEFORE any edit).
 
-Spawns the CURRENT (legacy, fastmcp 3.4.7) server exactly as the real
-~/.hermes/config.yaml `phone-location` entry does:
+Spawns the PRE-migration (legacy, fastmcp 3.4.7) server exactly as the
+pre-cutover `phone-location` config entry did — i.e. the configured
+interpreter running <repo-root>/server.py:
 
-    /mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3 <repo>/server.py
+    <venv-root>/phone-location-mcp/bin/python3 <repo-root>/server.py
 
 sends `initialize` (the legacy server answers it), then
 `notifications/initialized`, then `tools/list`, and writes the FULL `tools`
-array verbatim (no key filtering) to <repo>/golden/phone-location.tools.json.
+array verbatim (no key filtering) to <repo-root>/golden/phone-location.tools.json.
 
 Paths derive from __file__ (repo root = parent of this tools/ dir) so the
-script works from any checkout location. All logging goes to stderr; the only
-stdout line is the final success line. No network: pure stdio subprocess.
+script works from any checkout location. The interpreter is resolved from
+`$PROD_PY_PHONE_LOCATION_OLD` or the gitignored `.prod_py.old` pointer file
+(tools/prod_py.py) — it is deliberately NOT hardcoded, and deliberately has
+no `sys.executable` fallback: silently capturing against whatever interpreter
+happened to launch this script would produce an artifact whose provenance is
+a lie. Unconfigured is a hard failure at import, never a skip.
+
+All logging goes to stderr; the only stdout line is the final success line.
+No network: pure stdio subprocess.
 """
 
 import json
@@ -23,14 +31,19 @@ import sys
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "tools"))
+
+from prod_py import prod_py
+
 SERVER = os.path.join(REPO, "server.py")
 GOLDEN_DIR = os.path.join(REPO, "golden")
 OUT_PATH = os.path.join(GOLDEN_DIR, "phone-location.tools.json")
 
-# The CURRENT production interpreter (Python 3.11.15 + fastmcp 3.4.7) — the
-# command half of the config line quoted above. Capture runs against the
-# pre-migration server only; post-rewrite tests use /usr/bin/python3.
-INTERP = "/mnt/HC_Volume_105667182/kimbo/mcp-venvs/phone-location-mcp/bin/python3"
+# The pre-migration production interpreter (Python 3.11.15 + fastmcp 3.4.7).
+# Resolved at import — raises when unconfigured rather than falling back to
+# sys.executable. Capture runs against the pre-migration server only; the
+# migrated-era server is stdlib and runs on /usr/bin/python3.
+INTERP = prod_py()
 
 TIMEOUT_S = 20.0
 
